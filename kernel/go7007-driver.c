@@ -27,7 +27,7 @@
 #include <linux/device.h>
 #include <linux/i2c.h>
 #include <linux/firmware.h>
-#include <linux/semaphore.h>
+#include <linux/mutex.h>
 #include <linux/uaccess.h>
 #include <asm/system.h>
 #include <linux/videodev2.h>
@@ -140,9 +140,9 @@ int go7007_boot_encoder(struct go7007 *go, int init_i2c)
 {
 	int ret;
 
-	down(&go->hw_lock);
+	mutex_lock(&go->hw_lock);
 	ret = go7007_load_encoder(go);
-	up(&go->hw_lock);
+	mutex_unlock(&go->hw_lock);
 	if (ret < 0)
 		return -1;
 	if (!init_i2c)
@@ -272,9 +272,9 @@ int go7007_register_encoder(struct go7007 *go)
 
 	printk(KERN_INFO "go7007: registering new %s\n", go->name);
 
-	down(&go->hw_lock);
+	mutex_lock(&go->hw_lock);
 	ret = go7007_init_encoder(go);
-	up(&go->hw_lock);
+	mutex_unlock(&go->hw_lock);
 	if (ret < 0)
 		return -1;
 

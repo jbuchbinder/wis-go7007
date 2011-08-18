@@ -20,6 +20,8 @@
 #include <linux/version.h>
 #include <linux/i2c.h>
 #include <linux/videodev2.h>
+#include <linux/ioctl.h>
+#include <linux/slab.h>
 
 #include "wis-i2c.h"
 
@@ -256,14 +258,19 @@ static int wis_tw9906_remove(struct i2c_client *client)
         return 0;
 }
 
+static struct i2c_device_id wis_tw9906_id[] = {
+        { "wis_tw9906", 0 },
+        { }
+};
+
 static struct i2c_driver wis_tw9906_driver = {
 	.driver = {
 		.name	= "WIS TW9906 I2C driver",
 	},
-	.id		= I2C_DRIVERID_WIS_TW9906,
 	.command	= wis_tw9906_command,
 	.probe		= wis_tw9906_probe,
-	.remove		= wis_tw9906_remove
+	.remove		= wis_tw9906_remove,
+	.id_table	= wis_tw9906_id,
 };
 
 static int __init wis_tw9906_init(void)

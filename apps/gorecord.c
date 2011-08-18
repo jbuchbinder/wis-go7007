@@ -34,7 +34,7 @@
 #include <sys/mman.h>
 #include <sys/ioctl.h>
 #include <dirent.h>
-#include <linux/videodev.h>
+#include <linux/videodev2.h>
 #include <linux/soundcard.h>
 #include <errno.h>
 #include <math.h>
@@ -590,6 +590,8 @@ void open_avifile(void)
 	PUT_32(hdr + 12 + 12 + off, FOURCC("JUNK"));
 	PUT_32(hdr + 12 + 12 + off + 4, 1024 - 12 - 12 - off - 8);
 	PUT_32(hdr + 1024, FOURCC("LIST"));
+	/* AXJ -> movielen was uninitialized; I have set it to 0 which is probably wrong */
+	movielen = 0;
 	PUT_32(hdr + 1024 + 4, movielen - 1024 - 8);
 	PUT_32(hdr + 1024 + 8, FOURCC("movi"));
 	lseek(avifd, 0, SEEK_SET);

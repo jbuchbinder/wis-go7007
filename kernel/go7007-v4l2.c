@@ -30,7 +30,7 @@
 #include <media/v4l2-common.h>
 #include <media/v4l2-ioctl.h>
 #include <linux/i2c.h>
-#include <linux/semaphore.h>
+#include <linux/mutex.h>
 #include <linux/uaccess.h>
 #include <asm/system.h>
 
@@ -75,7 +75,7 @@ static int go7007_streamoff(struct go7007 *go)
 	int retval = -EINVAL;
 	unsigned long flags;
 
-	down(&go->hw_lock);
+	mutex_lock(&go->hw_lock);
 	if (go->streaming) {
 		go->streaming = 0;
 		go7007_stream_stop(go);
@@ -85,7 +85,7 @@ static int go7007_streamoff(struct go7007 *go)
 		go7007_reset_encoder(go);
 		retval = 0;
 	}
-	up(&go->hw_lock);
+	mutex_unlock(&go->hw_lock);
 	return 0;
 }
 
@@ -101,11 +101,7 @@ static int go7007_open(struct file *file)
 		return -ENOMEM;
 	++go->ref_count;
 	gofh->go = go;
-#ifndef init_MUTEX
-	sema_init(&gofh->lock, 1);
-#else
-	init_MUTEX(&gofh->lock);
-#endif
+	mutex_init(&gofh->lock);
 	gofh->buf_count = 0;
 	file->private_data = gofh;
 	return 0;
@@ -709,14 +705,14 @@ static int vidioc_reqbufs(struct file *file, void *priv,
 			req->memory != V4L2_MEMORY_MMAP)
 		return -EINVAL;
 
-	down(&gofh->lock);
+	mutex_lock(&gofh->lock);
 	for (i = 0; i < gofh->buf_count; ++i)
 		if (gofh->bufs[i].mapped > 0)
 			goto unlock_and_return;
 
-	down(&go->hw_lock);
+	mutex_lock(&go->hw_lock);
 	if (go->in_use > 0 && gofh->buf_count == 0) {
-		up(&go->hw_lock);
+		mutex_unlock(&go->hw_lock);
 		goto unlock_and_return;
 	}
 
@@ -735,7 +731,7 @@ static int vidioc_reqbufs(struct file *file, void *priv,
 				     GFP_KERNEL);
 
 		if (!gofh->bufs) {
-			up(&go->hw_lock);
+			mutex_unlock(&go->hw_lock);
 			goto unlock_and_return;
 		}
 
@@ -754,8 +750,8 @@ static int vidioc_reqbufs(struct file *file, void *priv,
 	}
 
 	gofh->buf_count = count;
-	up(&go->hw_lock);
-	up(&gofh->lock);
+	mutex_unlock(&go->hw_lock);
+	mutex_unlock(&gofh->lock);
 
 	memset(req, 0, sizeof(*req));
 
@@ -766,7 +762,7 @@ static int vidioc_reqbufs(struct file *file, void *priv,
 	return 0;
 
 unlock_and_return:
-	up(&gofh->lock);
+	mutex_unlock(&gofh->lock);
 	return retval;
 }
 
@@ -782,7 +778,7 @@ static int vidioc_querybuf(struct file *file, void *priv,
 
 	index = buf->index;
 
-	down(&gofh->lock);
+	mutex_lock(&gofh->lock);
 	if (index >= gofh->buf_count)
 		goto unlock_and_return;
 
@@ -806,12 +802,12 @@ static int vidioc_querybuf(struct file *file, void *priv,
 	buf->memory = V4L2_MEMORY_MMAP;
 	buf->m.offset = index * GO7007_BUF_SIZE;
 	buf->length = GO7007_BUF_SIZE;
-	up(&gofh->lock);
+	mutex_unlock(&gofh->lock);
 
 	return 0;
 
 unlock_and_return:
-	up(&gofh->lock);
+	mutex_unlock(&gofh->lock);
 	return retval;
 }
 
@@ -828,7 +824,7 @@ static int vidioc_qbuf(struct file *file, void *priv, struct v4l2_buffer *buf)
 			buf->memory != V4L2_MEMORY_MMAP)
 		return retval;
 
-	down(&gofh->lock);
+	mutex_lock(&gofh->lock);
 	if (buf->index < 0 || buf->index >= gofh->buf_count)
 		goto unlock_and_return;
 
@@ -869,12 +865,12 @@ static int vidioc_qbuf(struct file *file, void *priv, struct v4l2_buffer *buf)
 	spin_lock_irqsave(&go->spinlock, flags);
 	list_add_tail(&gobuf->stream, &go->stream);
 	spin_unlock_irqrestore(&go->spinlock, flags);
-	up(&gofh->lock);
+	mutex_unlock(&gofh->lock);
 
 	return 0;
 
 unlock_and_return:
-	up(&gofh->lock);
+	mutex_unlock(&gofh->lock);
 	return retval;
 }
 
@@ -894,7 +890,7 @@ static int vidioc_dqbuf(struct file *file, void *priv, struct v4l2_buffer *buf)
 	if (buf->memory != V4L2_MEMORY_MMAP)
 		return retval;
 
-	down(&gofh->lock);
+	mutex_lock(&gofh->lock);
 	if (list_empty(&go->stream))
 		goto unlock_and_return;
 	gobuf = list_entry(go->stream.next,
@@ -938,11 +934,11 @@ static int vidioc_dqbuf(struct file *file, void *priv, struct v4l2_buffer *buf)
 	buf->length = GO7007_BUF_SIZE;
 	buf->reserved = gobuf->modet_active;
 
-	up(&gofh->lock);
+	mutex_unlock(&gofh->lock);
 	return 0;
 
 unlock_and_return:
-	up(&gofh->lock);
+	mutex_unlock(&gofh->lock);
 	return retval;
 }
 
@@ -956,8 +952,8 @@ static int vidioc_streamon(struct file *file, void *priv,
 	if (type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
 		return -EINVAL;
 
-	down(&gofh->lock);
-	down(&go->hw_lock);
+	mutex_lock(&gofh->lock);
+	mutex_lock(&go->hw_lock);
 
 	if (!go->streaming) {
 		go->streaming = 1;
@@ -968,8 +964,8 @@ static int vidioc_streamon(struct file *file, void *priv,
 		else
 			retval = 0;
 	}
-	up(&go->hw_lock);
-	up(&gofh->lock);
+	mutex_unlock(&go->hw_lock);
+	mutex_unlock(&gofh->lock);
 
 	return retval;
 }
@@ -982,9 +978,9 @@ static int vidioc_streamoff(struct file *file, void *priv,
 
 	if (type != V4L2_BUF_TYPE_VIDEO_CAPTURE)
 		return -EINVAL;
-	down(&gofh->lock);
+	mutex_lock(&gofh->lock);
 	go7007_streamoff(go);
-	up(&gofh->lock);
+	mutex_unlock(&gofh->lock);
 
 	return 0;
 }
@@ -1750,7 +1746,7 @@ static long go7007_do_ioctl(struct file *file,
 	return 0;
 
 /*unlock_and_return:*/
-	/*up(&gofh->lock);*/
+	/*mutex_unlock(&gofh->lock);*/
 	return retval;
 }
 
@@ -1824,18 +1820,18 @@ static int go7007_mmap(struct file *file, struct vm_area_struct *vma)
 		return -EINVAL; /* only support VM_SHARED mapping */
 	if (vma->vm_end - vma->vm_start != GO7007_BUF_SIZE)
 		return -EINVAL; /* must map exactly one full buffer */
-	down(&gofh->lock);
+	mutex_lock(&gofh->lock);
 	index = vma->vm_pgoff / GO7007_BUF_PAGES;
 	if (index >= gofh->buf_count) {
-		up(&gofh->lock);
+		mutex_unlock(&gofh->lock);
 		return -EINVAL; /* trying to map beyond requested buffers */
 	}
 	if (index * GO7007_BUF_PAGES != vma->vm_pgoff) {
-		up(&gofh->lock);
+		mutex_unlock(&gofh->lock);
 		return -EINVAL; /* offset is not aligned on buffer boundary */
 	}
 	if (gofh->bufs[index].mapped > 0) {
-		up(&gofh->lock);
+		mutex_unlock(&gofh->lock);
 		return -EBUSY;
 	}
 	gofh->bufs[index].mapped = 1;
@@ -1844,7 +1840,7 @@ static int go7007_mmap(struct file *file, struct vm_area_struct *vma)
 	vma->vm_flags |= VM_DONTEXPAND;
 	vma->vm_flags &= ~VM_IO;
 	vma->vm_private_data = &gofh->bufs[index];
-	up(&gofh->lock);
+	mutex_unlock(&gofh->lock);
 	return 0;
 }
 
@@ -1956,7 +1952,7 @@ void go7007_v4l2_remove(struct go7007 *go)
 {
 	unsigned long flags;
 
-	down(&go->hw_lock);
+	mutex_lock(&go->hw_lock);
 	if (go->streaming) {
 		go->streaming = 0;
 		go7007_stream_stop(go);
@@ -1964,7 +1960,7 @@ void go7007_v4l2_remove(struct go7007 *go)
 		abort_queued(go);
 		spin_unlock_irqrestore(&go->spinlock, flags);
 	}
-	up(&go->hw_lock);
+	mutex_unlock(&go->hw_lock);
 	if (go->video_dev)
 		video_unregister_device(go->video_dev);
 }

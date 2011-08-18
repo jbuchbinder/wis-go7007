@@ -134,7 +134,7 @@ struct go7007_buffer {
 
 struct go7007_file {
 	struct go7007 *go;
-	struct semaphore lock;
+	struct mutex lock;
 	int buf_count;
 	struct go7007_buffer *bufs;
 };
@@ -172,7 +172,7 @@ struct go7007 {
 	int ref_count;
 	enum { STATUS_INIT, STATUS_ONLINE, STATUS_SHUTDOWN } status;
 	spinlock_t spinlock;
-	struct semaphore hw_lock;
+	struct mutex hw_lock;
 	int streaming;
 	int in_use;
 	int audio_enabled;

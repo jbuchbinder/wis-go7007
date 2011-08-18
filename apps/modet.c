@@ -29,7 +29,7 @@
 #include <sys/mman.h>
 #include <sys/ioctl.h>
 #include <dirent.h>
-#include <linux/videodev.h>
+#include <linux/videodev2.h>
 #include <errno.h>
 
 #include <curses.h>
