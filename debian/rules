@@ -1,0 +1,13 @@
+#!/usr/bin/make -f
+# managed by CDBS
+
+include /usr/share/cdbs/1/rules/debhelper.mk
+include /usr/share/cdbs/1/rules/simple-patchsys.mk
+
+DEB_INSTALL_MANPAGES_MODULE_NAME-kernel-source="debian/wis-go7007.8"
+DEB_DH_INSTALL_ARGS=--exclude=debian/
+
+SRC_VERSION := $(shell dpkg-parsechangelog | grep '^Version:' | cut -d' ' -f2 | cut -d- -f1 | cut -d\: -f2)
+binary-install/wis-go7007-kernel-source::
+	cp $(CURDIR)/debian/dkms.conf $(CURDIR)/debian/$(cdbs_curpkg)/usr/src/MODULE_NAME-$(SRC_VERSION)
+

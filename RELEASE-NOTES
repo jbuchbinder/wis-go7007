@@ -2,6 +2,11 @@
 RELEASE NOTES FOR WIS GO7007SB LINUX DRIVER
 ---------------------------------------------------------------------------
 
+Last updated: GIT
+
+ - Release 0.9.9 is updated to work on modern kernels, and has all
+   publically available modern patches bundled into it.
+
 Last updated: 5 November 2005
 
  - Release 0.9.7 includes new support for using udev to run fxload.  The

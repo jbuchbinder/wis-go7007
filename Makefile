@@ -96,5 +96,5 @@ endif
 
 clean:
 	$(MAKE) clean -C $(KSRC) M=$(shell pwd)/kernel
-	rm -f hotplug/wis-ezusb udev/go7007_firmware_load udev/91-wis-ezusb.rules
+	rm -rf hotplug/wis-ezusb udev/go7007_firmware_load udev/91-wis-ezusb.rules kernel/.tmp_versions
 	$(MAKE) clean -C apps

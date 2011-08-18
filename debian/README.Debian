@@ -1,0 +1,11 @@
+wis-go7007 DKMS module for Debian
+-----------------
+
+Please see ./README for a description of the wis-go7007 software.
+
+The Debian wis-go7007 source package provides:
+
+ 1) wis-go7007 driver
+ 2) wis-go7007-kernel-source, which provides the source for the kernel modules
+
+ -- Jeff Buchbinder <jeff@ourexchange.net> 

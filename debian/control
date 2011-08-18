@@ -1,0 +1,12 @@
+Source: wis-go7007
+Section: misc
+Priority: optional
+Maintainer: Jeff Buchbinder <jeff@ourexchange.net>
+Build-Depends: debhelper (>= 5)
+Standards-Version: 3.7.2
+
+Package: wis-go7007-dkms
+Architecture: all
+Depends: dkms (>= 1.95), bash (>> 1.99)
+Description: wis-go7007 driver in DKMS format.
+
