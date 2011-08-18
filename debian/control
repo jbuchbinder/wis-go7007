@@ -7,6 +7,6 @@ Standards-Version: 3.7.2
 
 Package: wis-go7007-dkms
 Architecture: all
-Depends: dkms (>= 1.95), bash (>> 1.99)
+Depends: dkms (>= 1.95), bash (>> 1.99), fxload
 Description: wis-go7007 driver in DKMS format.
 
