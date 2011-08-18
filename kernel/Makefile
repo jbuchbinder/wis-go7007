@@ -2,7 +2,7 @@ EXTRA_CFLAGS += -DDEBUG -DDRIVER -D_SDK_PACGEN_ -D_LINUX -I$(shell pwd)
 
 obj-m += go7007.o go7007-usb.o snd-go7007.o wis-saa7115.o wis-tw9903.o \
 		wis-uda1342.o wis-sony-tuner.o wis-saa7113.o wis-ov7640.o \
-		wis-tw2804.o
+		wis-tw2804.o wis-tw9906.o
 
 
 obj-m += go7007.o

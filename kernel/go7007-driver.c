@@ -167,10 +167,22 @@ static int go7007_init_encoder(struct go7007 *go)
 		go7007_write_addr(go, 0x1000, 0x0811);
 		go7007_write_addr(go, 0x1000, 0x0c11);
 	}
-	if (go->board_id == GO7007_BOARDID_MATRIX_REV) {
+	switch (go->board_id) {
+	case GO7007_BOARDID_MATRIX_REV:
 		/* Set GPIO pin 0 to be an output (audio clock control) */
 		go7007_write_addr(go, 0x3c82, 0x0001);
 		go7007_write_addr(go, 0x3c80, 0x00fe);
+		break;
+	case GO7007_BOARDID_ADS_USBAV_709:
+		/* GPIO pin 0: audio clock control */
+		/*      pin 2: TW9906 reset */
+		/*      pin 3: capture LED */
+		go7007_write_addr(go, 0x3c82, 0x000d);
+		go7007_write_addr(go, 0x3c80, 0x00f2);
+		break;
+	default:
+		/* No special setup */
+		break;
 	}
 	return 0;
 }
@@ -212,6 +224,9 @@ static int init_i2c_module(struct i2c_adapter *adapter, const char *type,
 		break;
 	case I2C_DRIVERID_WIS_TW9903:
 		modname = "wis-tw9903";
+		break;
+	case I2C_DRIVERID_WIS_TW9906:
+		modname = "wis-tw9906";
 		break;
 	case I2C_DRIVERID_WIS_TW2804:
 		modname = "wis-tw2804";
@@ -270,6 +285,12 @@ int go7007_register_encoder(struct go7007 *go)
 		go->i2c_adapter_online = 1;
 	}
 	if (go->i2c_adapter_online) {
+		if (go->board_id == GO7007_BOARDID_ADS_USBAV_709) {
+			/* Reset the TW9906 */
+			go7007_write_addr(go, 0x3c82, 0x0009);
+			msleep(50);
+			go7007_write_addr(go, 0x3c82, 0x000d);
+		}
 		for (i = 0; i < go->board_info->num_i2c_devs; ++i)
 			init_i2c_module(&go->i2c_adapter,
 					go->board_info->i2c_devs[i].type,
@@ -417,18 +438,20 @@ static void write_bitmap_word(struct go7007 *go)
  */
 void go7007_parse_video_stream(struct go7007 *go, u8 *buf, int length)
 {
-	int i, seq_start_code = -1, frame_start_code = -1;
+	int i, seq_start_code = -1, gop_start_code = -1, frame_start_code = -1;
 
 	spin_lock(&go->spinlock);
 
 	switch (go->format) {
 	case GO7007_FORMAT_MPEG4:
 		seq_start_code = 0xB0;
+		gop_start_code = 0xB3;
 		frame_start_code = 0xB6;
 		break;
 	case GO7007_FORMAT_MPEG1:
 	case GO7007_FORMAT_MPEG2:
 		seq_start_code = 0xB3;
+		gop_start_code = 0xB8;
 		frame_start_code = 0x00;
 		break;
 	}
@@ -502,7 +525,7 @@ void go7007_parse_video_stream(struct go7007 *go, u8 *buf, int length)
 					go->format == GO7007_FORMAT_MPEG2 ||
 					go->format == GO7007_FORMAT_MPEG4) &&
 					(buf[i] == seq_start_code ||
-						buf[i] == 0xB8 || /* GOP code */
+						buf[i] == gop_start_code ||
 						buf[i] == frame_start_code)) {
 				if (go->active_buf == NULL || go->seen_frame)
 					frame_boundary(go);

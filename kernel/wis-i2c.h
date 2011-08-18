@@ -24,6 +24,7 @@
 #define	I2C_DRIVERID_WIS_OV7640		0xf0f5
 #define	I2C_DRIVERID_WIS_TW2804		0xf0f6
 #define	I2C_DRIVERID_S2250		0xf0f7
+#define	I2C_DRIVERID_WIS_TW9906         0xf0f8
 
 /* Flag to indicate that the client needs to be accessed with SCCB semantics */
 /* We re-use the I2C_M_TEN value so the flag passes through the masks in the

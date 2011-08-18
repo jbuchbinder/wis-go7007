@@ -19,8 +19,7 @@
 #include <linux/init.h>
 #include <linux/version.h>
 #include <linux/i2c.h>
-#include <linux/videodev.h>
-#include <linux/video_decoder.h>
+#include <linux/videodev2.h>
 
 #include "wis-i2c.h"
 
@@ -85,21 +84,21 @@ static int wis_tw9906_command(struct i2c_client *client,
 	struct wis_tw9906 *dec = i2c_get_clientdata(client);
 
 	switch (cmd) {
-	case DECODER_SET_INPUT:
+	case VIDIOC_S_INPUT:
 	{
 		int *input = arg;
 
 		i2c_smbus_write_byte_data(client, 0x02, 0x40 | (*input << 1));
 		break;
 	}
-	case DECODER_SET_NORM:
+	case VIDIOC_S_STD:
 	{
 		int *input = arg;
 		u8 regs[] = {
-			0x05, *input == VIDEO_MODE_NTSC ? 0x81 : 0x01,
-			0x07, *input == VIDEO_MODE_NTSC ? 0x02 : 0x12,
-			0x08, *input == VIDEO_MODE_NTSC ? 0x14 : 0x18,
-			0x09, *input == VIDEO_MODE_NTSC ? 0xf0 : 0x20,
+			0x05, *input == V4L2_STD_NTSC ? 0x81 : 0x01,
+			0x07, *input == V4L2_STD_NTSC ? 0x02 : 0x12,
+			0x08, *input == V4L2_STD_NTSC ? 0x14 : 0x18,
+			0x09, *input == V4L2_STD_NTSC ? 0xf0 : 0x20,
 			0,	0,
 		};
 		write_regs(client, regs);
@@ -212,10 +211,11 @@ static struct i2c_client wis_tw9906_client_templ = {
 	.driver		= &wis_tw9906_driver,
 };
 
-static int wis_tw9906_detect(struct i2c_adapter *adapter, int addr, int kind)
+static int wis_tw9906_probe(struct i2c_client *client,
+                            const struct i2c_device_id *id)
 {
-	struct i2c_client *client;
-	struct wis_tw9906 *dec;
+        struct i2c_adapter *adapter = client->adapter;
+        struct wis_tw9906 *dec;
 
 	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_BYTE_DATA))
 		return 0;
@@ -223,82 +223,56 @@ static int wis_tw9906_detect(struct i2c_adapter *adapter, int addr, int kind)
 	client = kmalloc(sizeof(struct i2c_client), GFP_KERNEL);
 	if (client == NULL)
 		return -ENOMEM;
-	memcpy(client, &wis_tw9906_client_templ,
-			sizeof(wis_tw9906_client_templ));
-	client->adapter = adapter;
-	client->addr = addr;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,12)
-	client->id = wis_tw9906_i2c_id++;
-#endif
 
-	dec = kmalloc(sizeof(struct wis_tw9906), GFP_KERNEL);
-	if (dec == NULL) {
-		kfree(client);
-		return -ENOMEM;
-	}
-	dec->norm = VIDEO_MODE_NTSC;
-	dec->brightness = 0;
-	dec->contrast = 0x60;
-	dec->hue = 0;
-	i2c_set_clientdata(client, dec);
+        dec = kmalloc(sizeof(struct wis_tw9906), GFP_KERNEL);
+        if (dec == NULL)
+                return -ENOMEM;
 
-	printk(KERN_DEBUG
-		"wis-tw9906: initializing TW9906 at address %d on %s\n",
-		addr, adapter->name);
+        dec->norm = V4L2_STD_NTSC;
+        dec->brightness = 0;
+        dec->contrast = 0x60;
+        dec->hue = 0;
+        i2c_set_clientdata(client, dec);
 
-	if (write_regs(client, initial_registers) < 0)
-	{
-		printk(KERN_ERR "wis-tw9906: error initializing TW9906\n");
-		kfree(client);
-		kfree(dec);
-		return 0;
-	}
+        printk(KERN_DEBUG
+                "wis-tw9906: initializing TW9906 at address %d on %s\n",
+                client->addr, adapter->name);
 
-	i2c_attach_client(client);
+        if (write_regs(client, initial_registers) < 0) {
+                printk(KERN_ERR "wis-tw9906: error initializing TW9906\n");
+                kfree(dec);
+                return -ENODEV;
+        }
+
 	return 0;
 }
 
-static int wis_tw9906_detach(struct i2c_client *client)
+static int wis_tw9906_remove(struct i2c_client *client)
 {
-	struct wis_tw9906 *dec = i2c_get_clientdata(client);
-	int r;
+        struct wis_tw9906 *dec = i2c_get_clientdata(client);
 
-	r = i2c_detach_client(client);
-	if (r < 0)
-		return r;
-
-	kfree(client);
-	kfree(dec);
-	return 0;
+        i2c_set_clientdata(client, NULL);
+        kfree(dec);
+        return 0;
 }
 
 static struct i2c_driver wis_tw9906_driver = {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,16)
-	.owner		= THIS_MODULE,
-	.name		= "WIS TW9906 I2C driver",
-#else
 	.driver = {
 		.name	= "WIS TW9906 I2C driver",
 	},
-#endif
 	.id		= I2C_DRIVERID_WIS_TW9906,
-	.detach_client	= wis_tw9906_detach,
 	.command	= wis_tw9906_command,
+	.probe		= wis_tw9906_probe,
+	.remove		= wis_tw9906_remove
 };
 
 static int __init wis_tw9906_init(void)
 {
-	int r;
-
-	r = i2c_add_driver(&wis_tw9906_driver);
-	if (r < 0)
-		return r;
-	return wis_i2c_add_driver(wis_tw9906_driver.id, wis_tw9906_detect);
+        return i2c_add_driver(&wis_tw9906_driver);
 }
 
 static void __exit wis_tw9906_cleanup(void)
 {
-	wis_i2c_del_driver(wis_tw9906_detect);
 	i2c_del_driver(&wis_tw9906_driver);
 }
 
