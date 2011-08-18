@@ -1,0 +1,18 @@
+
+Although this version is already patched, the patchs are provided in patches/
+To apply them, from the top of the source directory do something like this:
+
+	patch -p1 < patches/wis-go7007-linux-0.9.8-updates.patch
+
+------------------------
+
+Updated further by taking the latest from the staging-2.6 git tree, and applying
+necessary modifications to work on ubuntu jaunty (9.04), which uses a 2.6.28
+kernel (add private ioctl's back in, add 'struct inode *' parameter to open()/release()).
+
+note: Also probably needs this change: http://nikosapi.org/wiki/index.php/WIS_Go7007_Linux_driver#Ubuntu_usbfs_fix
+      (see also patches/mountdevsubfs.sh-usbfs.patch-2)
+
+-----------
+0.9.8-4 adds a detection to allow compiling with 2.6.27, and fixes the audio device detection in gorecord to work on 2.6.28
+

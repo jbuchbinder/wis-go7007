@@ -1,0 +1,733 @@
+diff -ru wis-go7007-linux-0.9.8/apps/gorecord.c wis-go7007-linux-0.9.8-patched/apps/gorecord.c
+--- wis-go7007-linux-0.9.8/apps/gorecord.c	2006-04-01 17:35:17.000000000 -0500
++++ wis-go7007-linux-0.9.8-patched/apps/gorecord.c	2007-03-21 21:21:36.000000000 -0400
+@@ -16,6 +16,11 @@
+  * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+  */
++/* May 27, 2005 
++ * A-V Sync by Timo Pylvanainen, tpyl+nosa at iki <dot> fi  */
++/* July 23, 2006
++ * Playable AVI while recording 
++ * by Francois Beerten, avrecord dot 10 dot fb at spamgourmet dot com */
+ 
+ #include <sys/types.h>
+ #include <sys/stat.h>
+@@ -32,6 +37,7 @@
+ #include <linux/videodev.h>
+ #include <linux/soundcard.h>
+ #include <errno.h>
++#include <math.h>
+ 
+ #include "../include/go7007.h"
+ 
+@@ -40,10 +46,11 @@
+ #define PUT_32(p,v) ((p)[0]=(v)&0xff,(p)[1]=((v)>>8)&0xff,(p)[2]=((v)>>16)&0xff,(p)[3]=((v)>>24)&0xff)
+ #define FOURCC(c) (((c)[3]<<24)|((c)[2]<<16)|((c)[1]<<8)|(c)[0])
+ 
+-#define MAX_FILE_SIZE	(1000*1024*1024) /* Keep files just under 1GB */
++#define MAX_FILE_SIZE	(4*1000*1024*1024ul) /*  Keep files max filesize around 4GB */
+ 
+ #define MAX_BUFFERS	32
+ #define AUDIO_BUF_LEN	(256*1024)
++#define MIN_SYNC_STEP 16
+ 
+ /* Defined in tv-freq.c */
+ int chan_to_freq(char *name);
+@@ -54,12 +61,16 @@
+ int buf_count = 0;
+ int avi_frame_count = 0;
+ int total_frames = 0;
++int total_av_corr = 0;
++double av_offset = 0;
++double fps=29.97;
+ int duration = -1;
+ unsigned int sequence;
+ int frame_limit = -1;
+ int max_frame_length = 0;
+ unsigned int vbytes = 0, abytes = 0;
+ unsigned char audio_buffer[AUDIO_BUF_LEN];
++unsigned char audio_sync_buffer[AUDIO_BUF_LEN];
+ int audio_len = 0;
+ int nowrite = 0;
+ int probe = 0;
+@@ -352,6 +363,12 @@
+ 						"secam-l, ntsc-j\n");
+ 				exit(1);
+ 			}
++			if(std == V4L2_STD_NTSC_M_JP ||
++			   std ==  V4L2_STD_NTSC_M ) {
++				fps = 29.97;
++			} else {
++				fps = 25.0;
++			}
+ 		} else if (!strcmp(argv[i], "-tvchan")) {
+ 			tv_freq = chan_to_freq(argv[++i]);
+ 			if (tv_freq < 0)
+@@ -436,6 +453,80 @@
+ 	}
+ }
+ 
++int add_video_stream_header(unsigned char *hdr)
++{
++	unsigned int video_fourcc;
++
++	switch (format) {
++	case FMT_MJPEG:
++		video_fourcc = FOURCC("mjpg");
++		break;
++	case FMT_MPEG1:
++		video_fourcc = FOURCC("mpg1");
++		break;
++	case FMT_MPEG2:
++		video_fourcc = FOURCC("mpg2");
++		break;
++	case FMT_MPEG4:
++		video_fourcc = FOURCC("DX50");
++		break;
++	default:
++		video_fourcc = 0;
++		break;
++	}
++
++	PUT_32(hdr, FOURCC("LIST"));
++	PUT_32(hdr + 4, 12 - 8 + 64 + 48);
++	PUT_32(hdr + 8, FOURCC("strl"));
++	PUT_32(hdr + 12, FOURCC("strh"));
++	PUT_32(hdr + 12 + 4, 64 - 8);
++	PUT_32(hdr + 12 + 8, FOURCC("vids"));
++	PUT_32(hdr + 12 + 12, video_fourcc);
++	PUT_32(hdr + 12 + 28, frameperiod.numerator);
++	PUT_32(hdr + 12 + 32, frameperiod.denominator);
++	PUT_32(hdr + 12 + 40, avi_frame_count);
++	PUT_32(hdr + 12 + 44, max_frame_length);
++	PUT_16(hdr + 12 + 60, width);
++	PUT_16(hdr + 12 + 62, height);
++	PUT_32(hdr + 12 + 64, FOURCC("strf"));
++	PUT_32(hdr + 12 + 64 + 4, 48 - 8);
++	PUT_32(hdr + 12 + 64 + 8, 48 - 8);
++	PUT_32(hdr + 12 + 64 + 12, width);
++	PUT_32(hdr + 12 + 64 + 16, height);
++	PUT_32(hdr + 12 + 64 + 20, 1);
++	PUT_32(hdr + 12 + 64 + 22, 24);
++	PUT_32(hdr + 12 + 64 + 24, video_fourcc);
++	PUT_32(hdr + 12 + 64 + 28, width * height * 3);
++	return 12 + 64 + 48;
++}
++
++int add_audio_stream_header(unsigned char *hdr)
++{
++	PUT_32(hdr, FOURCC("LIST"));
++	PUT_32(hdr + 4, 12 - 8 + 64 + 26);
++	PUT_32(hdr + 8, FOURCC("strl"));
++
++	PUT_32(hdr + 12, FOURCC("strh"));
++	PUT_32(hdr + 12 + 4, 64 - 8);
++	PUT_32(hdr + 12 + 8, FOURCC("auds"));
++	PUT_32(hdr + 12 + 12, 1);
++	PUT_32(hdr + 12 + 28, 4);
++	PUT_32(hdr + 12 + 32, 48000 << 2);
++	PUT_32(hdr + 12 + 40, abytes >> 2);
++	PUT_32(hdr + 12 + 44, 48000 << 1);
++	PUT_32(hdr + 12 + 52, 4);
++
++	PUT_32(hdr + 12 + 64, FOURCC("strf"));
++	PUT_32(hdr + 12 + 64 + 4, 26 - 8);
++	PUT_16(hdr + 12 + 64 + 8, 1);
++	PUT_16(hdr + 12 + 64 + 10, 2);
++	PUT_32(hdr + 12 + 64 + 12, 48000);
++	PUT_32(hdr + 12 + 64 + 16, 48000 << 2);
++	PUT_16(hdr + 12 + 64 + 20, 4);
++	PUT_16(hdr + 12 + 64 + 22, 16);
++	return 12 + 64 + 26;
++}
++
+ void open_avifile(void)
+ {
+ 	/* First open the temporary file we'll store the index in */
+@@ -453,6 +544,45 @@
+ 				strerror(errno));
+ 		exit(1);
+ 	}
++
++	int movielen, off;
++	unsigned char hdr[1024 + 12];
++
++	memset(hdr, 0, sizeof(hdr));
++	PUT_32(hdr, FOURCC("RIFF"));
++	PUT_32(hdr + 4, lseek(avifd, 0, SEEK_CUR) - 8);
++	PUT_32(hdr + 8, FOURCC("AVI "));
++	PUT_32(hdr + 12, FOURCC("LIST"));
++	PUT_32(hdr + 12 + 8, FOURCC("hdrl"));
++	PUT_32(hdr + 12 + 12, FOURCC("avih"));
++	PUT_32(hdr + 12 + 12 + 4, 64 - 8);
++	/* bizarre math to do microsecond arithmetic in 32-bit ints */
++	/* =>   1000000 * frameperiod.numerator / frameperiod.denominator */
++	PUT_32(hdr + 12 + 12 + 8, (frameperiod.numerator * 15625 /
++						frameperiod.denominator) * 64 +
++					((frameperiod.numerator * 15625) %
++					 	frameperiod.denominator) * 64 /
++					frameperiod.denominator);
++	PUT_32(hdr + 12 + 12 + 20, 2320);
++	PUT_32(hdr + 12 + 12 + 24, avi_frame_count);
++	PUT_32(hdr + 12 + 12 + 32, audfd < 0 ? 1 : 2);
++	PUT_32(hdr + 12 + 12 + 36, 128*1024);
++	PUT_32(hdr + 12 + 12 + 40, width);
++	PUT_32(hdr + 12 + 12 + 44, height);
++	off = 64;
++	off += add_video_stream_header(hdr + 12 + 12 + off);
++	if (audfd >= 0)
++		off += add_audio_stream_header(hdr + 12 + 12 + off);
++	PUT_32(hdr + 12 + 4, 12 - 8 + off);
++
++	PUT_32(hdr + 12 + 12 + off, FOURCC("JUNK"));
++	PUT_32(hdr + 12 + 12 + off + 4, 1024 - 12 - 12 - off - 8);
++	PUT_32(hdr + 1024, FOURCC("LIST"));
++	PUT_32(hdr + 1024 + 4, movielen - 1024 - 8);
++	PUT_32(hdr + 1024 + 8, FOURCC("movi"));
++	lseek(avifd, 0, SEEK_SET);
++	write(avifd, hdr, 1024 + 12);
++
+ 	lseek(avifd, 1024 + 12, SEEK_SET);
+ }
+ 
+@@ -888,10 +1018,94 @@
+ 	}
+ 	if (interrupted) return 0;
+ 	audio_len += ret;
+-	abytes += ret;
+ 	return ret;
+ }
+ 
++
++void average16b(unsigned char* dst, unsigned char* src1, unsigned char* src2)
++{
++	int16_t a,b,c;
++	
++	a = (((u_int16_t)*(src1+1)) << 8) | (u_int16_t)*(src1);
++	b = (((u_int16_t)*(src2+1)) << 8) | (u_int16_t)*(src2);
++
++	c = a/2+b/2 + (a&b&0x1);
++	*dst = ((u_int16_t)c)&0xFF;
++	*(dst+1) = (((u_int16_t)c)>>8)&0xFF;
++}
++	
++
++int audio_video_sync(void)
++{
++	int i=0;
++	int j=0;
++	int k=0;
++	static int sync_step=0;
++	
++	
++	while(i<audio_len && j < AUDIO_BUF_LEN) {
++		/* If av_offset more than about 50ms and sync_step reached */
++		if(fabs(av_offset) > 4000 && 
++		   sync_step > (int)(192000.0/fabs(av_offset)) && sync_step > MIN_SYNC_STEP ) {
++			/* If audio lagging, i.e. too many audio bytes, and
++			 * enough audio_buffer left to average samples then do that */
++			if(av_offset < 0 && i < audio_len-4) {
++				/* Merge two samples into one */
++				for(k=0;k<2;k++) {
++					average16b(&audio_sync_buffer[j], &audio_buffer[i], &audio_buffer[i+4]);
++					i+=2;
++					j+=2;
++				}
++				i+=4;
++				/* Offset now reduced by 4 bytes */
++				av_offset += 4;
++				total_av_corr -= 4;
++				/* Correction performed */
++				sync_step = 0;
++			} else if(av_offset > 0 && j < AUDIO_BUF_LEN-4) {
++				/* Audio running, i.e. too few audio bytes, then insert
++				 * samples */
++				
++				for(k=0;k<2;k++) {
++					/* Copy first words */
++					audio_sync_buffer[j] = audio_buffer[i];
++					audio_sync_buffer[j+1] = audio_buffer[i+1];
++					
++					/* Create second words */
++					average16b(&audio_sync_buffer[j+4], &audio_buffer[i], &audio_buffer[i+4]); 
++					i+=2;
++					j+=2;
++				}
++				j+=4;
++				/* Four bytes added */
++				av_offset -= 4;
++				total_av_corr += 4;
++				/* Correction performed */
++				sync_step = 0;
++			} else { /* To make sure something is always done */
++				for(k=0;k<4&&i<audio_len;k++) {
++					audio_sync_buffer[j] = audio_buffer[i];
++					j++;
++					i++;
++				}
++			}
++		} else {
++			/* No sync correction, move forward in both buffers */
++			for(k=0;k<4&&i<audio_len;k++) {
++				audio_sync_buffer[j] = audio_buffer[i];
++				j++;
++				i++;
++			}
++		}
++		sync_step++;
++		if(interrupted) {
++			return 0;
++		}
++	}
++	return j;
++}
++
++
+ int v4l2_frame_capture(struct timeval *capture_time)
+ {
+ 	struct v4l2_buffer buf;
+@@ -920,7 +1134,13 @@
+ 	if (audfd >= 0) {
+ 		alsa_read();
+ 		if (interrupted) return 0;
+-		write_frame(audio_buffer, audio_len, FOURCC("01wb"), 1);
++		/* Must be careful to update av_offset before 
++		 * calling audio_video_sync */
++		av_offset -= (double)audio_len;
++		audio_len = audio_video_sync();
++		if(interrupted) return 0;
++		write_frame(audio_sync_buffer, audio_len, FOURCC("01wb"), 1);
++		abytes += audio_len;
+ 		audio_len = 0;
+ 	}
+ 
+@@ -940,79 +1160,6 @@
+ 	return length;
+ }
+ 
+-int add_video_stream_header(unsigned char *hdr)
+-{
+-	unsigned int video_fourcc;
+-
+-	switch (format) {
+-	case FMT_MJPEG:
+-		video_fourcc = FOURCC("mjpg");
+-		break;
+-	case FMT_MPEG1:
+-		video_fourcc = FOURCC("mpg1");
+-		break;
+-	case FMT_MPEG2:
+-		video_fourcc = FOURCC("mpg2");
+-		break;
+-	case FMT_MPEG4:
+-		video_fourcc = FOURCC("DX50");
+-		break;
+-	default:
+-		video_fourcc = 0;
+-		break;
+-	}
+-
+-	PUT_32(hdr, FOURCC("LIST"));
+-	PUT_32(hdr + 4, 12 - 8 + 64 + 48);
+-	PUT_32(hdr + 8, FOURCC("strl"));
+-	PUT_32(hdr + 12, FOURCC("strh"));
+-	PUT_32(hdr + 12 + 4, 64 - 8);
+-	PUT_32(hdr + 12 + 8, FOURCC("vids"));
+-	PUT_32(hdr + 12 + 12, video_fourcc);
+-	PUT_32(hdr + 12 + 28, frameperiod.numerator);
+-	PUT_32(hdr + 12 + 32, frameperiod.denominator);
+-	PUT_32(hdr + 12 + 40, avi_frame_count);
+-	PUT_32(hdr + 12 + 44, max_frame_length);
+-	PUT_16(hdr + 12 + 60, width);
+-	PUT_16(hdr + 12 + 62, height);
+-	PUT_32(hdr + 12 + 64, FOURCC("strf"));
+-	PUT_32(hdr + 12 + 64 + 4, 48 - 8);
+-	PUT_32(hdr + 12 + 64 + 8, 48 - 8);
+-	PUT_32(hdr + 12 + 64 + 12, width);
+-	PUT_32(hdr + 12 + 64 + 16, height);
+-	PUT_32(hdr + 12 + 64 + 20, 1);
+-	PUT_32(hdr + 12 + 64 + 22, 24);
+-	PUT_32(hdr + 12 + 64 + 24, video_fourcc);
+-	PUT_32(hdr + 12 + 64 + 28, width * height * 3);
+-	return 12 + 64 + 48;
+-}
+-
+-int add_audio_stream_header(unsigned char *hdr)
+-{
+-	PUT_32(hdr, FOURCC("LIST"));
+-	PUT_32(hdr + 4, 12 - 8 + 64 + 26);
+-	PUT_32(hdr + 8, FOURCC("strl"));
+-
+-	PUT_32(hdr + 12, FOURCC("strh"));
+-	PUT_32(hdr + 12 + 4, 64 - 8);
+-	PUT_32(hdr + 12 + 8, FOURCC("auds"));
+-	PUT_32(hdr + 12 + 12, 1);
+-	PUT_32(hdr + 12 + 28, 4);
+-	PUT_32(hdr + 12 + 32, 48000 << 2);
+-	PUT_32(hdr + 12 + 40, abytes >> 2);
+-	PUT_32(hdr + 12 + 44, 48000 << 1);
+-	PUT_32(hdr + 12 + 52, 4);
+-
+-	PUT_32(hdr + 12 + 64, FOURCC("strf"));
+-	PUT_32(hdr + 12 + 64 + 4, 26 - 8);
+-	PUT_16(hdr + 12 + 64 + 8, 1);
+-	PUT_16(hdr + 12 + 64 + 10, 2);
+-	PUT_32(hdr + 12 + 64 + 12, 48000);
+-	PUT_32(hdr + 12 + 64 + 16, 48000 << 2);
+-	PUT_16(hdr + 12 + 64 + 20, 4);
+-	PUT_16(hdr + 12 + 64 + 22, 16);
+-	return 12 + 64 + 26;
+-}
+ 
+ void avi_finish(void)
+ {
+@@ -1092,8 +1239,10 @@
+ 			abytes, "uncompressed PCM");
+ 	fprintf(stderr, "    AVI file format overhead  : %d bytes\n",
+ 			filelen - vbytes - abytes);
+-	fprintf(stderr, "    Total file size           : %d bytes\n\n",
++	fprintf(stderr, "    Total file size           : %d bytes\n",
+ 			filelen);
++	fprintf(stderr, "    Total A/V correction      : %d bytes\n\n",
++			total_av_corr );
+ }
+ 
+ void interrupt_handler(int signal)
+@@ -1120,13 +1269,7 @@
+ 
+ 	memset(audio_buffer, 0, sizeof(audio_buffer));
+ 	parse_opts(argc, argv);
+-	if (!nowrite) {
+-		if (strstr(avibase, "%d"))
+-			sprintf(avifile, avibase, file_count);
+-		else
+-			strcpy(avifile, avibase);
+-		open_avifile();
+-	}
++
+ 	open_devices();
+ 	v4l2_init();
+ 	if (audfd >= 0)
+@@ -1135,7 +1278,19 @@
+ 		printf("For usage help, run `%s -help`\n", argv[0]);
+ 		return 0;
+ 	}
++
++	if (!nowrite) {
++		if (strstr(avibase, "%d"))
++			sprintf(avifile, avibase, file_count);
++		else
++			strcpy(avifile, avibase);
++		open_avifile();
++	}
++
+ 	v4l2_start();
++	/* This will set the audiosync to be in line with the initial sync */
++	av_offset += 192000.0*2.0/fps;
++
+ 	for (;;) {
+ 		/* Retrieve a new video frame and audio frame */
+ 		vframe_len = v4l2_frame_capture(&cur);
+@@ -1149,14 +1304,16 @@
+ 		else
+ 			filesize = lseek(avifd, 0, SEEK_CUR);
+ 		++avi_frame_count;
++		av_offset += 192000.0/fps;
+ 		if (total_frames++ == 0)
+ 			mmark = start = cur;
+ 		csec = 100 * (cur.tv_sec - start.tv_sec) +
+ 			(cur.tv_usec - start.tv_usec) / 10000;
+ 		fprintf(stderr,
+ 			"\r %02d:%02d.%02d  Frames: %5d  "
+-			"AVI size: %9d", csec / 6000, csec / 100 % 60,
+-			csec % 100, total_frames, filesize);
++			"AVI size: %3dMB  A-V: %7.2fms", csec / 6000, csec / 100 % 60,
++			csec % 100, total_frames, filesize / 1024 / 1024, -av_offset/192);
++
+ 
+ 		/* Calculate and display video bitrate */
+ 		if (mcount++ == 50) {
+@@ -1169,12 +1326,12 @@
+ 		}
+ 		mbytes += vframe_len;
+ 		if (mrate > 0)
+-			fprintf(stderr, "  Video bitrate: %5d kbps", mrate);
++			fprintf(stderr, "  Video: %5dkbps", mrate);
+ 
+ 		/* If we've reached the maximum AVI length, make a new file
+ 		 * if we were given a filename with %d, or otherwise stop
+ 		 * recording */
+-		if (avifd >= 0 && filesize >= MAX_FILE_SIZE) {
++		if (avifd >= 0 && filesize >= MAX_FILE_SIZE) { 
+ 			if(strstr(avibase, "%d")) {
+ 				avi_finish();
+ 				++file_count;
+diff -ru wis-go7007-linux-0.9.8/apps/Makefile wis-go7007-linux-0.9.8-patched/apps/Makefile
+--- wis-go7007-linux-0.9.8/apps/Makefile	2005-10-02 17:39:57.000000000 -0400
++++ wis-go7007-linux-0.9.8-patched/apps/Makefile	2007-03-21 14:08:27.000000000 -0400
+@@ -7,7 +7,9 @@
+ 	gcc -Wall $(CFLAGS) -o modet modet.c -lncurses
+ 
+ install:
+-	@echo "No install for apps yet"
++	@echo "Installing apps to /usr/bin/"
++	install -m 0755 gorecord /usr/bin/
++	install -m 0755 modet /usr/bin/
+ 
+ clean:
+ 	rm -f gorecord modet *.o
+diff -ru wis-go7007-linux-0.9.8/kernel/go7007-driver.c wis-go7007-linux-0.9.8-patched/kernel/go7007-driver.c
+--- wis-go7007-linux-0.9.8/kernel/go7007-driver.c	2006-04-01 17:35:48.000000000 -0500
++++ wis-go7007-linux-0.9.8-patched/kernel/go7007-driver.c	2007-03-21 13:51:54.000000000 -0400
+@@ -18,7 +18,9 @@
+ #include <linux/module.h>
+ #include <linux/version.h>
+ #include <linux/init.h>
++#if LINUX_VERSION_CODE <= KERNEL_VERSION(2,6,17)
+ #include <linux/config.h>
++#endif
+ #include <linux/delay.h>
+ #include <linux/sched.h>
+ #include <linux/spinlock.h>
+diff -ru wis-go7007-linux-0.9.8/kernel/go7007-fw.c wis-go7007-linux-0.9.8-patched/kernel/go7007-fw.c
+--- wis-go7007-linux-0.9.8/kernel/go7007-fw.c	2006-04-01 17:35:55.000000000 -0500
++++ wis-go7007-linux-0.9.8-patched/kernel/go7007-fw.c	2007-03-21 13:51:54.000000000 -0400
+@@ -26,7 +26,10 @@
+ 
+ #include <linux/module.h>
+ #include <linux/init.h>
++#include <linux/version.h>
++#if LINUX_VERSION_CODE <= KERNEL_VERSION(2,6,17)
+ #include <linux/config.h>
++#endif
+ #include <linux/time.h>
+ #include <linux/mm.h>
+ #include <linux/device.h>
+diff -ru wis-go7007-linux-0.9.8/kernel/go7007-i2c.c wis-go7007-linux-0.9.8-patched/kernel/go7007-i2c.c
+--- wis-go7007-linux-0.9.8/kernel/go7007-i2c.c	2006-04-01 17:36:00.000000000 -0500
++++ wis-go7007-linux-0.9.8-patched/kernel/go7007-i2c.c	2007-03-21 13:51:54.000000000 -0400
+@@ -15,9 +15,11 @@
+  * Inc., 59 Temple Place - Suite 330, Boston MA 02111-1307, USA.
+  */
+ 
++#include <linux/version.h>
++#if LINUX_VERSION_CODE <= KERNEL_VERSION(2,6,17)
+ #include <linux/config.h>
++#endif
+ #include <linux/module.h>
+-#include <linux/version.h>
+ #include <linux/init.h>
+ #include <linux/delay.h>
+ #include <linux/sched.h>
+diff -ru wis-go7007-linux-0.9.8/kernel/go7007-usb.c wis-go7007-linux-0.9.8-patched/kernel/go7007-usb.c
+--- wis-go7007-linux-0.9.8/kernel/go7007-usb.c	2006-04-01 17:57:04.000000000 -0500
++++ wis-go7007-linux-0.9.8-patched/kernel/go7007-usb.c	2007-03-21 13:51:54.000000000 -0400
+@@ -27,7 +27,7 @@
+ #include <linux/usb.h>
+ #include <linux/i2c.h>
+ #include <asm/byteorder.h>
+-#include <media/audiochip.h>
++#include <media/tvaudio.h>
+ 
+ #include "go7007-priv.h"
+ #include "wis-i2c.h"
+@@ -225,17 +225,17 @@
+ 		.inputs 	 = {
+ 			{
+ 				.video_input	= 1,
+-				.audio_input	= AUDIO_EXTERN,
++                .audio_input	= TVAUDIO_INPUT_EXTERN,
+ 				.name		= "Composite",
+ 			},
+ 			{
+ 				.video_input	= 8,
+-				.audio_input	= AUDIO_EXTERN,
++				.audio_input	= TVAUDIO_INPUT_EXTERN,
+ 				.name		= "S-Video",
+ 			},
+ 			{
+ 				.video_input	= 3,
+-				.audio_input	= AUDIO_TUNER,
++				.audio_input	= TVAUDIO_INPUT_TUNER,
+ 				.name		= "Tuner",
+ 			},
+ 		},
+@@ -645,8 +645,12 @@
+ 	return 0;
+ }
+ 
++#if LINUX_VERSION_CODE <= KERNEL_VERSION(2,6,18)
+ static void go7007_usb_readinterrupt_complete(struct urb *urb,
+-		struct pt_regs *pt_regs)
++        struct pt_regs *pt_regs)
++#else
++static void go7007_usb_readinterrupt_complete(struct urb *urb)
++#endif
+ {
+ 	struct go7007 *go = (struct go7007 *)urb->context;
+ 	u16 *regs = (u16 *)urb->transfer_buffer;
+@@ -690,8 +694,12 @@
+ 	return 0;
+ }
+ 
++#if LINUX_VERSION_CODE <= KERNEL_VERSION(2,6,18)
+ static void go7007_usb_read_video_pipe_complete(struct urb *urb,
+-		struct pt_regs *pt_regs)
++        struct pt_regs *pt_regs)
++#else
++static void go7007_usb_read_video_pipe_complete(struct urb *urb)
++#endif
+ {
+ 	struct go7007 *go = (struct go7007 *)urb->context;
+ 	int r;
+@@ -715,8 +723,12 @@
+ 		printk(KERN_ERR "go7007-usb: error in video pipe: %d\n", r);
+ }
+ 
++#if LINUX_VERSION_CODE <= KERNEL_VERSION(2,6,18)
+ static void go7007_usb_read_audio_pipe_complete(struct urb *urb,
+-		struct pt_regs *pt_regs)
++       struct pt_regs *pt_regs)
++#else
++static void go7007_usb_read_audio_pipe_complete(struct urb *urb)
++#endif
+ {
+ 	struct go7007 *go = (struct go7007 *)urb->context;
+ 	int r;
+diff -ru wis-go7007-linux-0.9.8/kernel/go7007-v4l2.c wis-go7007-linux-0.9.8-patched/kernel/go7007-v4l2.c
+--- wis-go7007-linux-0.9.8/kernel/go7007-v4l2.c	2006-04-01 18:22:03.000000000 -0500
++++ wis-go7007-linux-0.9.8-patched/kernel/go7007-v4l2.c	2007-03-21 13:51:54.000000000 -0400
+@@ -17,8 +17,10 @@
+ 
+ #include <linux/module.h>
+ #include <linux/init.h>
+-#include <linux/config.h>
+ #include <linux/version.h>
++#if LINUX_VERSION_CODE <= KERNEL_VERSION(2,6,17)
++#include <linux/config.h>
++#endif
+ #include <linux/delay.h>
+ #include <linux/sched.h>
+ #include <linux/spinlock.h>
+@@ -939,7 +941,7 @@
+ 		if (go->i2c_adapter_online) {
+ 			i2c_clients_command(&go->i2c_adapter, DECODER_SET_INPUT,
+ 				&go->board_info->inputs[*input].video_input);
+-			i2c_clients_command(&go->i2c_adapter, AUDC_SET_INPUT,
++			i2c_clients_command(&go->i2c_adapter, VIDIOC_S_AUDIO,
+ 				&go->board_info->inputs[*input].audio_input);
+ 		}
+ 		return 0;
+diff -ru wis-go7007-linux-0.9.8/kernel/snd-go7007.c wis-go7007-linux-0.9.8-patched/kernel/snd-go7007.c
+--- wis-go7007-linux-0.9.8/kernel/snd-go7007.c	2006-04-01 17:36:38.000000000 -0500
++++ wis-go7007-linux-0.9.8-patched/kernel/snd-go7007.c	2007-03-21 13:51:54.000000000 -0400
+@@ -20,7 +20,9 @@
+ #include <linux/version.h>
+ #include <linux/moduleparam.h>
+ #include <linux/init.h>
++#if LINUX_VERSION_CODE <= KERNEL_VERSION(2,6,17)
+ #include <linux/config.h>
++#endif
+ #include <linux/delay.h>
+ #include <linux/sched.h>
+ #include <linux/vmalloc.h>
+@@ -305,7 +307,11 @@
+ 	struct go7007_snd *gosnd = go->snd_context;
+ 
+ 	snd_card_disconnect(gosnd->card);
++#if LINUX_VERSION_CODE <= KERNEL_VERSION(2,6,18)
+ 	snd_card_free_in_thread(gosnd->card);
++#else
++    snd_card_free_when_closed(gosnd->card);
++#endif
+ 	return 0;
+ }
+ EXPORT_SYMBOL(go7007_snd_remove);
+diff -ru wis-go7007-linux-0.9.8/kernel/wis-saa7113.c wis-go7007-linux-0.9.8-patched/kernel/wis-saa7113.c
+--- wis-go7007-linux-0.9.8/kernel/wis-saa7113.c	2006-04-01 17:37:06.000000000 -0500
++++ wis-go7007-linux-0.9.8-patched/kernel/wis-saa7113.c	2007-03-21 13:51:54.000000000 -0400
+@@ -21,6 +21,7 @@
+ #include <linux/i2c.h>
+ #include <linux/videodev.h>
+ #include <linux/video_decoder.h>
++#include <linux/ioctl.h>
+ 
+ #include "wis-i2c.h"
+ 
+diff -ru wis-go7007-linux-0.9.8/kernel/wis-saa7115.c wis-go7007-linux-0.9.8-patched/kernel/wis-saa7115.c
+--- wis-go7007-linux-0.9.8/kernel/wis-saa7115.c	2006-04-01 17:37:12.000000000 -0500
++++ wis-go7007-linux-0.9.8-patched/kernel/wis-saa7115.c	2007-03-21 13:51:54.000000000 -0400
+@@ -21,6 +21,7 @@
+ #include <linux/i2c.h>
+ #include <linux/videodev.h>
+ #include <linux/video_decoder.h>
++#include <linux/ioctl.h>
+ 
+ #include "wis-i2c.h"
+ 
+diff -ru wis-go7007-linux-0.9.8/kernel/wis-tw2804.c wis-go7007-linux-0.9.8-patched/kernel/wis-tw2804.c
+--- wis-go7007-linux-0.9.8/kernel/wis-tw2804.c	2006-04-01 17:37:22.000000000 -0500
++++ wis-go7007-linux-0.9.8-patched/kernel/wis-tw2804.c	2007-03-21 13:51:54.000000000 -0400
+@@ -21,6 +21,7 @@
+ #include <linux/i2c.h>
+ #include <linux/videodev.h>
+ #include <linux/video_decoder.h>
++#include <linux/ioctl.h>
+ 
+ #include "wis-i2c.h"
+ 
+diff -ru wis-go7007-linux-0.9.8/kernel/wis-tw9903.c wis-go7007-linux-0.9.8-patched/kernel/wis-tw9903.c
+--- wis-go7007-linux-0.9.8/kernel/wis-tw9903.c	2006-04-01 17:37:28.000000000 -0500
++++ wis-go7007-linux-0.9.8-patched/kernel/wis-tw9903.c	2007-03-21 13:51:54.000000000 -0400
+@@ -21,6 +21,7 @@
+ #include <linux/i2c.h>
+ #include <linux/videodev.h>
+ #include <linux/video_decoder.h>
++#include <linux/ioctl.h>
+ 
+ #include "wis-i2c.h"
+ 
+diff -ru wis-go7007-linux-0.9.8/kernel/wis-uda1342.c wis-go7007-linux-0.9.8-patched/kernel/wis-uda1342.c
+--- wis-go7007-linux-0.9.8/kernel/wis-uda1342.c	2006-04-01 17:37:32.000000000 -0500
++++ wis-go7007-linux-0.9.8-patched/kernel/wis-uda1342.c	2007-03-21 13:51:54.000000000 -0400
+@@ -20,7 +20,7 @@
+ #include <linux/version.h>
+ #include <linux/i2c.h>
+ #include <linux/videodev.h>
+-#include <media/audiochip.h>
++#include <media/tvaudio.h>
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,16)
+ #include <media/v4l2-common.h>
+ #endif
+@@ -38,15 +38,15 @@
+ 				unsigned int cmd, void *arg)
+ {
+ 	switch (cmd) {
+-	case AUDC_SET_INPUT:
++	case VIDIOC_S_AUDIO:
+ 	{
+ 		int *inp = arg;
+ 
+ 		switch (*inp) {
+-		case AUDIO_TUNER:
++		case TVAUDIO_INPUT_TUNER:
+ 			write_reg(client, 0x00, 0x1441); /* select input 2 */
+ 			break;
+-		case AUDIO_EXTERN:
++		case TVAUDIO_INPUT_EXTERN:
+ 			write_reg(client, 0x00, 0x1241); /* select input 1 */
+ 			break;
+ 		default:
+diff -ru wis-go7007-linux-0.9.8/Makefile wis-go7007-linux-0.9.8-patched/Makefile
+--- wis-go7007-linux-0.9.8/Makefile	2005-11-05 12:58:07.000000000 -0500
++++ wis-go7007-linux-0.9.8-patched/Makefile	2007-03-25 17:27:37.000000000 -0400
+@@ -2,7 +2,7 @@
+ KSRC = $(shell readlink -f $(KERNELSRC))
+ FXLOAD = $(wildcard /sbin/fxload) $(wildcard /usr/sbin/fxload) \
+ 	$(wildcard /usr/local/sbin/fxload)
+-UDEV_RULES = $(wildcard /etc/udev/rules.d/*udev.rules)
++UDEV_RULES = $(wildcard /etc/udev/rules.d/*.rules)
+ 
+ ifneq ($(strip $(UDEV_RULES)),)
+ USE_UDEV = $(shell grep -q RUN $(UDEV_RULES) && echo y)

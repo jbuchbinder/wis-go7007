@@ -1,0 +1,17 @@
+--- mountdevsubfs.sh	2007-12-19 14:36:26.000000000 -0500
++++ mountdevsubfs.sh	2007-12-02 12:53:45.000000000 -0500
+@@ -39,10 +39,10 @@
+ 	#
+ 	# Magic to make /proc/bus/usb work
+ 	#
+-	#mkdir -p /dev/bus/usb/.usbfs
+-	#domount usbfs "" /dev/bus/usb/.usbfs -obusmode=0700,devmode=0600,listmode=0644
+-	#ln -s .usbfs/devices /dev/bus/usb/devices
+-	#mount --rbind /dev/bus/usb /proc/bus/usb
++	mkdir -p /dev/bus/usb/.usbfs
++	domount usbfs "" /dev/bus/usb/.usbfs -obusmode=0700,devmode=0600,listmode=0644
++	ln -s .usbfs/devices /dev/bus/usb/devices
++	mount --rbind /dev/bus/usb /proc/bus/usb
+ }
+ 
+ case "$1" in

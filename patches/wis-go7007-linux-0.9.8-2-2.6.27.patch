@@ -1,0 +1,83 @@
+diff -Naur wis-go7007-linux-0.9.8-2/kernel/go7007-driver.c wis-go7007-linux-0.9.8-2-kernel-2.6.27/kernel/go7007-driver.c
+--- wis-go7007-linux-0.9.8-2/kernel/go7007-driver.c	2007-03-21 12:51:54.000000000 -0500
++++ wis-go7007-linux-0.9.8-2-kernel-2.6.27/kernel/go7007-driver.c	2008-12-30 21:04:32.545534308 -0600
+@@ -32,7 +32,7 @@
+ #include <linux/i2c.h>
+ #include <linux/firmware.h>
+ #include <asm/uaccess.h>
+-#include <asm/semaphore.h>
++#include <linux/semaphore.h>
+ #include <asm/system.h>
+ #include <linux/videodev.h>
+ #include <media/tuner.h>
+diff -Naur wis-go7007-linux-0.9.8-2/kernel/go7007-i2c.c wis-go7007-linux-0.9.8-2-kernel-2.6.27/kernel/go7007-i2c.c
+--- wis-go7007-linux-0.9.8-2/kernel/go7007-i2c.c	2008-04-06 09:28:35.000000000 -0500
++++ wis-go7007-linux-0.9.8-2-kernel-2.6.27/kernel/go7007-i2c.c	2008-12-30 21:04:32.569550193 -0600
+@@ -29,7 +29,7 @@
+ #include <linux/device.h>
+ #include <linux/i2c.h>
+ #include <asm/uaccess.h>
+-#include <asm/semaphore.h>
++#include <linux/semaphore.h>
+ #include <asm/system.h>
+ 
+ #include "go7007-priv.h"
+diff -Naur wis-go7007-linux-0.9.8-2/kernel/go7007-v4l2.c wis-go7007-linux-0.9.8-2-kernel-2.6.27/kernel/go7007-v4l2.c
+--- wis-go7007-linux-0.9.8-2/kernel/go7007-v4l2.c	2008-12-30 21:16:17.221534155 -0600
++++ wis-go7007-linux-0.9.8-2-kernel-2.6.27/kernel/go7007-v4l2.c	2008-12-30 21:10:24.252534209 -0600
+@@ -35,10 +35,12 @@
+ #include <media/audiochip.h>
+ #else
+ #include <media/v4l2-common.h>
++#include <media/v4l2-chip-ident.h>
++#include <media/v4l2-ioctl.h>
+ #endif
+ #include <linux/i2c.h>
+ #include <asm/uaccess.h>
+-#include <asm/semaphore.h>
++#include <linux/semaphore.h>
+ #include <asm/system.h>
+ 
+ #include "../include/go7007.h"
+@@ -1478,7 +1480,7 @@
+ 
+ static struct video_device go7007_template = {
+ 	.name		= "go7007",
+-	.type		= VID_TYPE_CAPTURE,
++	.vfl_type		= VID_TYPE_CAPTURE,
+ 	.fops		= &go7007_fops,
+ 	.minor		= -1,
+ 	.release	= go7007_vfl_release,
+@@ -1492,7 +1494,7 @@
+ 	if (go->video_dev == NULL)
+ 		return -ENOMEM;
+ 	memcpy(go->video_dev, &go7007_template, sizeof(go7007_template));
+-	go->video_dev->dev = go->dev;
++	go->video_dev->parent = go->dev;
+ 	rv = video_register_device(go->video_dev, VFL_TYPE_GRABBER, -1);
+ 	if (rv < 0)
+ 	{
+diff -Naur wis-go7007-linux-0.9.8-2/kernel/snd-go7007.c wis-go7007-linux-0.9.8-2-kernel-2.6.27/kernel/snd-go7007.c
+--- wis-go7007-linux-0.9.8-2/kernel/snd-go7007.c	2007-09-06 22:45:25.000000000 -0500
++++ wis-go7007-linux-0.9.8-2-kernel-2.6.27/kernel/snd-go7007.c	2008-12-30 21:04:33.077579435 -0600
+@@ -34,7 +34,7 @@
+ #include <linux/mm.h>
+ #include <linux/i2c.h>
+ #include <asm/uaccess.h>
+-#include <asm/semaphore.h>
++#include <linux/semaphore.h>
+ #include <asm/system.h>
+ #include <sound/driver.h>
+ #include <sound/core.h>
+diff -Naur wis-go7007-linux-0.9.8-2/kernel/wis-sony-tuner.c wis-go7007-linux-0.9.8-2-kernel-2.6.27/kernel/wis-sony-tuner.c
+--- wis-go7007-linux-0.9.8-2/kernel/wis-sony-tuner.c	2006-04-01 16:37:18.000000000 -0600
++++ wis-go7007-linux-0.9.8-2-kernel-2.6.27/kernel/wis-sony-tuner.c	2008-12-30 21:10:36.100534544 -0600
+@@ -23,6 +23,8 @@
+ #include <media/tuner.h>
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,16)
+ #include <media/v4l2-common.h>
++#include <media/v4l2-chip-ident.h>
++#include <media/v4l2-ioctl.h>
+ #endif
+ 
+ #include "wis-i2c.h"

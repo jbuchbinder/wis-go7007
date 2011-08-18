@@ -1,0 +1,4 @@
+ACTION=="add", ATTRS{idVendor}=="093b", ATTRS{idProduct}=="a002", RUN+="@DESTDIR@/usr/sbin/go7007_firmware_load"
+ACTION=="add", ATTRS{idVendor}=="093b", ATTRS{idProduct}=="a004", RUN+="@DESTDIR@/usr/sbin/go7007_firmware_load"
+ACTION=="add", ATTRS{idVendor}=="0eb1", ATTRS{idProduct}=="6666", RUN+="@DESTDIR@/usr/sbin/go7007_firmware_load"
+ACTION=="add", ATTRS{idVendor}=="0eb1", ATTRS{idProduct}=="6668", RUN+="@DESTDIR@/usr/sbin/go7007_firmware_load"

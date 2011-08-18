@@ -1,0 +1,8 @@
+After installation if the device doesn't appear to work try running
+	go7007_firmware_load
+If you get a usbfs error then you need to mount a usbfs partition, a patch is
+included for Ubuntu Gutsy (patches/mountdevsubfs.sh-usbfs.patch)
+Apply it like this (from the wis-go7007-linux-0.9.8... directory):
+	i=`pwd`; sudo patch -d /etc/init.d -p0 -i "$i"/patches/mountdevsubfs.sh-usbfs.patch
+
+Or you can always do it manually, just have a peek inside /etc/init.d/mountdevsubfs.sh

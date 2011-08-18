@@ -1,0 +1,43 @@
+#!/bin/bash
+# bash script to load the firmware for go7007 based devices
+PATH=$PATH:/bin:/usr/bin:/usr/local/bin:/sbin:/usr/sbin:/usr/local/sbin
+
+if [ `whoami` != "root" ]; then
+	echo "Please run this as root."
+	exit 1
+fi
+
+# list of supported devices
+devices="093b:a002|093b:a004|0eb1:6666|0eb1:6668"
+device=`lsusb | grep -iE $devices`
+if [ x"$device" == "x" ]; then
+    echo 'ERROR: Device not found on usb bus.'
+    exit 1
+fi
+
+## fxload needs usbfs
+#if [ ! -d "/dev/bus/usb" ] || [ ! "$(ls /proc/bus/usb)" ]; then
+#    echo "ERROR: Make sure usbfs|usbdevfs is mounted on /proc/bus/usb"
+#    exit 1
+#fi
+
+# get the bus number
+bus=`echo $device | cut -d " " -f 2`
+# get the device number
+device_num=`echo $device | cut -d " " -f 4 | sed 's/://'`
+# get the full device ID
+type=`echo $device | cut -d " " -f 6 | tr A-Z a-z`
+
+# match the type with it's firmware
+[ $type == "093b:a002" ] && hex="/lib/firmware/ezusb/hpi_PX-M402U.hex"
+[ $type == "093b:a004" ] && hex="/lib/firmware/ezusb/hpi_PX-TV402U.hex"
+[ $type == "0eb1:6666" ] && hex="/lib/firmware/ezusb/hpi_LR192.hex"
+[ $type == "0eb1:6668" ] && hex="/lib/firmware/ezusb/hpi_StarTrek.hex"
+
+
+if /sbin/fxload -t fx2 -I $hex -D /dev/bus/usb/"$bus"/"$device_num"; then
+    echo 'Firmware loaded successfully!'
+else
+    echo 'ERROR: Firmware not loaded :-('
+    exit 1
+fi

@@ -1,0 +1,155 @@
+diff -u wis-go7007-linux-0.9.8-patched/apps/gorecord.c wis-go7007-linux-0.9.8-1/apps/gorecord.c
+--- wis-go7007-linux-0.9.8-patched/apps/gorecord.c	2007-03-21 21:21:36.000000000 -0400
++++ wis-go7007-linux-0.9.8-1/apps/gorecord.c	2007-12-19 23:22:30.000000000 -0500
+@@ -46,8 +46,6 @@
+ #define PUT_32(p,v) ((p)[0]=(v)&0xff,(p)[1]=((v)>>8)&0xff,(p)[2]=((v)>>16)&0xff,(p)[3]=((v)>>24)&0xff)
+ #define FOURCC(c) (((c)[3]<<24)|((c)[2]<<16)|((c)[1]<<8)|(c)[0])
+ 
+-#define MAX_FILE_SIZE	(4*1000*1024*1024ul) /*  Keep files max filesize around 4GB */
+-
+ #define MAX_BUFFERS	32
+ #define AUDIO_BUF_LEN	(256*1024)
+ #define MIN_SYNC_STEP 16
+@@ -59,8 +57,8 @@
+ char avifile[PATH_MAX];
+ int vidfd = -1, audfd = -1, avifd = -1, idxfd = -1;
+ int buf_count = 0;
+-int avi_frame_count = 0;
+-int total_frames = 0;
++unsigned long long int avi_frame_count = 0;
++unsigned long long int total_frames = 0;
+ int total_av_corr = 0;
+ double av_offset = 0;
+ double fps=29.97;
+@@ -68,7 +66,8 @@
+ unsigned int sequence;
+ int frame_limit = -1;
+ int max_frame_length = 0;
+-unsigned int vbytes = 0, abytes = 0;
++unsigned long long int max_file_size = 0;
++unsigned long long int vbytes = 0, abytes = 0;
+ unsigned char audio_buffer[AUDIO_BUF_LEN];
+ unsigned char audio_sync_buffer[AUDIO_BUF_LEN];
+ int audio_len = 0;
+@@ -114,6 +113,7 @@
+ "  -verbose                      Verbosely describe all operations\n"
+ "  -duration <n>                 Stop capturing after <n> seconds\n"
+ "  -frames <n>                   Stop capturing after <n> video frames\n"
++"  -maxsize <n>                  Stop capturing after <n> Megabytes (2^20 bytes)\n"
+ "  -noaudio                      Do not capture audio; only video\n"
+ "  -nowrite                      Do not write captured video/audio to a file\n"
+ "  -vdevice <V4L2 device path>   Explicitly specify the V4L2 device to use\n"
+@@ -142,7 +142,10 @@
+ "  -bitrate <n>                  Specify a video bitrate (default: 1500 kbps)\n"
+ "  -format <format>              Encode video in <format> (default: mpeg4)\n"
+ "                                  Formats: mpeg1, mpeg2, mpeg2-dvd,\n"
+-"                                           mpeg4, mjpeg\n");
++"                                           mpeg4, mjpeg\n"
++"Other Options:\n"
++"  Use \"%%d\" in the filename in conjunction with the -maxsize option to\n"
++"  create a new file every <n> Megabytes. eg. gorecord filename-\"%%d\".avi\n");
+ 	exit(1);
+ }
+ 
+@@ -309,6 +312,8 @@
+ 			height = atoi(argv[++i]);
+ 		} else if (!strcmp(argv[i], "-fpsdrop")) {
+ 			fpsdrop = atoi(argv[++i]);
++		} else if (!strcmp(argv[i], "-maxsize")) {
++			max_file_size = atoi(argv[++i]) *1024*1024;
+ 		} else if (!strcmp(argv[i], "-bitrate")) {
+ 			bitrate = atoi(argv[++i]);
+ 			if (bitrate < 64000)
+@@ -1163,7 +1168,8 @@
+ 
+ void avi_finish(void)
+ {
+-	int i, movielen, filelen, off;
++	unsigned long long int filelen;
++	int i, movielen, off;
+ 	unsigned char hdr[1024 + 12];
+ 
+ 	movielen = lseek(avifd, 0, SEEK_CUR);
+@@ -1218,7 +1224,7 @@
+ 	close(avifd);
+ 
+ 	fprintf(stderr,
+-		"\n    Video data written to file: %d bytes of ", vbytes);
++		"\n    Video data written to file: %llu bytes of ", vbytes);
+ 	switch (format) {
+ 	case FMT_MJPEG:
+ 		fprintf(stderr, "Motion-JPEG\n");
+@@ -1235,11 +1241,11 @@
+ 	}
+ 	if (abytes > 0)
+ 		fprintf(stderr,
+-			"    Audio data written to file: %d bytes of %s\n",
++			"    Audio data written to file: %llu bytes of %s\n",
+ 			abytes, "uncompressed PCM");
+-	fprintf(stderr, "    AVI file format overhead  : %d bytes\n",
++	fprintf(stderr, "    AVI file format overhead  : %llu bytes\n",
+ 			filelen - vbytes - abytes);
+-	fprintf(stderr, "    Total file size           : %d bytes\n",
++	fprintf(stderr, "    Total file size           : %llu bytes\n",
+ 			filelen);
+ 	fprintf(stderr, "    Total A/V correction      : %d bytes\n\n",
+ 			total_av_corr );
+@@ -1254,10 +1260,10 @@
+ {
+ 	struct sigaction sa;
+ 	struct timeval cur, start, mmark;
+-	int csec, vframe_len;
+-	unsigned int filesize;
+-	int file_count = 1;
+-	int mcount = 0, mrate = 0, mbytes = 0;
++	unsigned long long int csec, filesize;
++	int vframe_len;
++	int file_count = 1, mrate = 0;
++	unsigned long long int mcount = 0, mbytes = 0;
+ 
+ 	memset(&sa, 0, sizeof(sa));
+ 	sa.sa_handler = interrupt_handler;
+@@ -1310,9 +1316,9 @@
+ 		csec = 100 * (cur.tv_sec - start.tv_sec) +
+ 			(cur.tv_usec - start.tv_usec) / 10000;
+ 		fprintf(stderr,
+-			"\r %02d:%02d.%02d  Frames: %5d  "
+-			"AVI size: %3dMB  A-V: %7.2fms", csec / 6000, csec / 100 % 60,
+-			csec % 100, total_frames, filesize / 1024 / 1024, -av_offset/192);
++			"\r %02llu:%02llu:%02llu.%02llu  Frames: %5llu  "
++			"AVI size: %3lluMB  A-V: %7.2fms", csec / 360000 % 60, csec / 6000 % 60,
++    			csec / 100 % 60, csec % 100, total_frames, filesize / 1024 / 1024, -av_offset/192);
+ 
+ 
+ 		/* Calculate and display video bitrate */
+@@ -1331,7 +1337,7 @@
+ 		/* If we've reached the maximum AVI length, make a new file
+ 		 * if we were given a filename with %d, or otherwise stop
+ 		 * recording */
+-		if (avifd >= 0 && filesize >= MAX_FILE_SIZE) { 
++		if (avifd >= 0 && filesize >= max_file_size && max_file_size > 0) { 
+ 			if(strstr(avibase, "%d")) {
+ 				avi_finish();
+ 				++file_count;
+@@ -1356,6 +1362,9 @@
+ 		if (duration >= 0 && cur.tv_sec >= start.tv_sec + duration &&
+ 				cur.tv_usec >= start.tv_usec)
+ 			break;
++		/* If we've reached the max file size, stop unless "%d" is in the filename */
++		if (max_file_size > 0 && filesize >= max_file_size && ! strstr(avibase, "%d"))
++			break;
+ 	}
+ 	fprintf(stderr, "\n");
+ 	v4l2_stop();
+diff -u wis-go7007-linux-0.9.8-patched/apps/Makefile wis-go7007-linux-0.9.8-1/apps/Makefile
+--- wis-go7007-linux-0.9.8-patched/apps/Makefile	2007-03-21 14:08:27.000000000 -0400
++++ wis-go7007-linux-0.9.8-1/apps/Makefile	2007-12-19 03:33:35.000000000 -0500
+@@ -1,7 +1,7 @@
+ all: gorecord modet
+ 
+ gorecord: gorecord.c tv-freq.c
+-	gcc -Wall $(CFLAGS) -o gorecord gorecord.c tv-freq.c
++	gcc -Wall $(CFLAGS) -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 -o gorecord gorecord.c tv-freq.c
+ 
+ modet: modet.c
+ 	gcc -Wall $(CFLAGS) -o modet modet.c -lncurses

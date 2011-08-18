@@ -1,0 +1,111 @@
+diff -u wis-go7007-linux-0.9.8-patched/kernel/go7007-usb.c wis-go7007-linux-0.9.8-backcompat/kernel/go7007-usb.c
+--- wis-go7007-linux-0.9.8-patched/kernel/go7007-usb.c	2007-03-21 13:51:54.000000000 -0400
++++ wis-go7007-linux-0.9.8-backcompat/kernel/go7007-usb.c	2007-12-18 23:53:19.000000000 -0500
+@@ -27,7 +27,11 @@
+ #include <linux/usb.h>
+ #include <linux/i2c.h>
+ #include <asm/byteorder.h>
++#if LINUX_VERSION_CODE <= KERNEL_VERSION(2,6,16)
++#include <media/audiochip.h>
++#else
+ #include <media/tvaudio.h>
++#endif
+ 
+ #include "go7007-priv.h"
+ #include "wis-i2c.h"
+@@ -225,17 +229,29 @@
+ 		.inputs 	 = {
+ 			{
+ 				.video_input	= 1,
+-                .audio_input	= TVAUDIO_INPUT_EXTERN,
++                                #if LINUX_VERSION_CODE <= KERNEL_VERSION(2,6,16)
++                                    .audio_input	= AUDIO_EXTERN,
++                                #else
++                                    .audio_input	= TVAUDIO_INPUT_EXTERN,
++                                #endif
+ 				.name		= "Composite",
+ 			},
+ 			{
+ 				.video_input	= 8,
+-				.audio_input	= TVAUDIO_INPUT_EXTERN,
++				#if LINUX_VERSION_CODE <= KERNEL_VERSION(2,6,16)
++                                    .audio_input	= AUDIO_EXTERN,
++                                #else
++                                    .audio_input	= TVAUDIO_INPUT_EXTERN,
++                                #endif
+ 				.name		= "S-Video",
+ 			},
+ 			{
+ 				.video_input	= 3,
+-				.audio_input	= TVAUDIO_INPUT_TUNER,
++				#if LINUX_VERSION_CODE <= KERNEL_VERSION(2,6,16)
++                                    .audio_input	= AUDIO_TUNER,
++                                #else
++                                    .audio_input	= TVAUDIO_INPUT_TUNER,
++                                #endif
+ 				.name		= "Tuner",
+ 			},
+ 		},
+diff -u wis-go7007-linux-0.9.8-patched/kernel/go7007-v4l2.c wis-go7007-linux-0.9.8-backcompat/kernel/go7007-v4l2.c
+--- wis-go7007-linux-0.9.8-patched/kernel/go7007-v4l2.c	2007-03-21 13:51:54.000000000 -0400
++++ wis-go7007-linux-0.9.8-backcompat/kernel/go7007-v4l2.c	2007-12-18 23:53:19.000000000 -0500
+@@ -941,7 +941,11 @@
+ 		if (go->i2c_adapter_online) {
+ 			i2c_clients_command(&go->i2c_adapter, DECODER_SET_INPUT,
+ 				&go->board_info->inputs[*input].video_input);
+-			i2c_clients_command(&go->i2c_adapter, VIDIOC_S_AUDIO,
++                        #if LINUX_VERSION_CODE <= KERNEL_VERSION(2,6,16)
++                            i2c_clients_command(&go->i2c_adapter, AUDC_SET_INPUT,
++                        #else
++			     i2c_clients_command(&go->i2c_adapter, VIDIOC_S_AUDIO,
++                        #endif
+ 				&go->board_info->inputs[*input].audio_input);
+ 		}
+ 		return 0;
+Only in wis-go7007-linux-0.9.8-backcompat/kernel/: Module.symvers
+diff -u wis-go7007-linux-0.9.8-patched/kernel/wis-uda1342.c wis-go7007-linux-0.9.8-backcompat/kernel/wis-uda1342.c
+--- wis-go7007-linux-0.9.8-patched/kernel/wis-uda1342.c	2007-03-21 13:51:54.000000000 -0400
++++ wis-go7007-linux-0.9.8-backcompat/kernel/wis-uda1342.c	2007-12-18 23:53:19.000000000 -0500
+@@ -20,7 +20,11 @@
+ #include <linux/version.h>
+ #include <linux/i2c.h>
+ #include <linux/videodev.h>
++#if LINUX_VERSION_CODE <= KERNEL_VERSION(2,6,16)
++#include <media/audiochip.h>
++#else
+ #include <media/tvaudio.h>
++#endif
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,16)
+ #include <media/v4l2-common.h>
+ #endif
+@@ -38,15 +42,27 @@
+ 				unsigned int cmd, void *arg)
+ {
+ 	switch (cmd) {
+-	case VIDIOC_S_AUDIO:
++        #if LINUX_VERSION_CODE <= KERNEL_VERSION(2,6,16)
++            case AUDC_SET_INPUT:
++        #else
++	   case VIDIOC_S_AUDIO:
++        #endif
+ 	{
+ 		int *inp = arg;
+ 
+ 		switch (*inp) {
+-		case TVAUDIO_INPUT_TUNER:
++                #if LINUX_VERSION_CODE <= KERNEL_VERSION(2,6,16)
++                    case AUDIO_TUNER:
++                #else
++		    case TVAUDIO_INPUT_TUNER:
++                #endif
+ 			write_reg(client, 0x00, 0x1441); /* select input 2 */
+ 			break;
+-		case TVAUDIO_INPUT_EXTERN:
++                #if LINUX_VERSION_CODE <= KERNEL_VERSION(2,6,16)
++                    case AUDIO_EXTERN:
++                #else
++		    case TVAUDIO_INPUT_EXTERN:
++                #endif
+ 			write_reg(client, 0x00, 0x1241); /* select input 1 */
+ 			break;
+ 		default:

@@ -1,0 +1,17 @@
+--- mountdevsubfs.sh.orig	2009-02-02 01:15:11.290790048 -0500
++++ mountdevsubfs.sh	2009-02-02 01:20:03.265536558 -0500
+@@ -39,6 +39,14 @@
+ 	# Mount /dev/pts. Master ptmx node is already created by udev.
+ 	#
+         domount devpts "" /dev/pts devpts -onoexec,nosuid,gid=$TTYGRP,mode=$TTYMODE
++
++  	#
++  	# Magic to make /proc/bus/usb work
++  	#
++	mkdir -p /dev/bus/usb/.usbfs
++	domount usbfs "" /dev/bus/usb/.usbfs usbfs -obusmode=0700,devmode=0600,listmode=0644
++	#ln -s .usbfs/devices /dev/bus/usb/devices
++	mount --rbind /dev/bus/usb /proc/bus/usb
+ }
+ 
+ case "$1" in
