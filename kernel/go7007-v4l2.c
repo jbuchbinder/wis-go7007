@@ -101,7 +101,11 @@ static int go7007_open(struct file *file)
 		return -ENOMEM;
 	++go->ref_count;
 	gofh->go = go;
+#ifndef init_MUTEX
+	sema_init(&gofh->lock, 1);
+#else
 	init_MUTEX(&gofh->lock);
+#endif
 	gofh->buf_count = 0;
 	file->private_data = gofh;
 	return 0;
